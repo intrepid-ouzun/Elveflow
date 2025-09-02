@@ -32,22 +32,22 @@ Instr_ID = c_int32(-1)
 # error codes from the end of the SDK User Guide - probably won't need all of them
 # more error codes can be found: https://www.ni.com/docs/en-US/bundle/labview-api-ref/page/errors/general-labview-error-codes.html
 class ErrorCode(IntEnum):
-    NO_DIGITAL_SENSOR                      = -8000
-    NO_PRESSURE_SENSOR_OB1_MK3             = -8001
-    NO_DIGITAL_PRESSURE_SENSOR_MK3_PLUS    = -8002
-    NO_DIGITAL_FLOW_SENSOR_MK3             = -8003
-    NO_IPA_CONFIG_FOR_SENSOR               = -8004
-    SENSOR_NOT_COMPATIBLE                  = -8005
-    NO_INSTRUMENT_WITH_SELECTED_ID         = -8006
-    WRONG_MUX_DEVICE                       = -8007
-    ONLY_AVAILABLE_FOR_MUX_WIRE_V3         = -8008
-    VALVE_TYPE_RESERVED_FOR_V3_USE_4_5_6   = -8009
-    NO_COMMUNICATION_WITH_OB1              = -8030
-    NO_COMMUNICATION_WITH_BFS              = -8031
-    NO_COMMUNICATION_WITH_MSRD             = -8032
-    OB1_REMOTE_LOOP_NOT_EXECUTED           = -8033
-    BFS_REMOTE_LOOP_NOT_EXECUTED           = -8034
-    MSRD_REMOTE_LOOP_NOT_EXECUTED          = -8035
+    NO_DIGITAL_SENSOR                      = 8000
+    NO_PRESSURE_SENSOR_OB1_MK3             = 8001
+    NO_DIGITAL_PRESSURE_SENSOR_MK3_PLUS    = 8002
+    NO_DIGITAL_FLOW_SENSOR_MK3             = 8003
+    NO_IPA_CONFIG_FOR_SENSOR               = 8004
+    SENSOR_NOT_COMPATIBLE                  = 8005
+    NO_INSTRUMENT_WITH_SELECTED_ID         = 8006
+    WRONG_MUX_DEVICE                       = 8007
+    ONLY_AVAILABLE_FOR_MUX_WIRE_V3         = 8008
+    VALVE_TYPE_RESERVED_FOR_V3_USE_4_5_6   = 8009
+    NO_COMMUNICATION_WITH_OB1              = 8030
+    NO_COMMUNICATION_WITH_BFS              = 8031
+    NO_COMMUNICATION_WITH_MSRD             = 8032
+    OB1_REMOTE_LOOP_NOT_EXECUTED           = 8033
+    BFS_REMOTE_LOOP_NOT_EXECUTED           = 8034
+    MSRD_REMOTE_LOOP_NOT_EXECUTED          = 8035
 
 ERROR_MESSAGES: dict[ErrorCode, str] = {
     ErrorCode.NO_DIGITAL_SENSOR:                    "No Digital Sensor found",
@@ -138,10 +138,27 @@ def loadCalibration(path: str):
     _raise_if_error(error, "OB1: loadCalibration")
     
     
-def setPressure(channel:int, pressure: float = 0):
-    error=OB1_Set_Press(Instr_ID.value, c_int32(channel), c_double(pressure)) 
+def setPressure(channel: int, pressure: float = 0):
+    
+    if (pressure < -900 or pressure > 1000):
+        print("Outside the pressure range of [-900,1000] mbar")
+        return -1
+    
+    error = OB1_Set_Press(Instr_ID.value, c_int32(channel), c_double(pressure)) 
     #print(f"OB1_setPressure -> error: {error}").strip()
     _raise_if_error(error, "OB1: setPressure")
+
+def readMFS(instrID: int, channel: int):
+    regulatorData = c_double()
+    sensorData = c_double()
+    
+    error = OB1_Get_Data(instrID, channel, byref(regulatorData), byref(sesensorDatans))
+    if error != 0:
+        raise RuntimeError(f"OB1_Get_Data error: {error}")
+    return regulatorData.value, sensorData.value
+    
+
+#PID feedbck function / depositing a certain volmume function
     
 #keep adding working loop functions to test  
     
@@ -150,10 +167,13 @@ def main():
     
    #typical workflow would be initialize -> addSensor -> calibrate (perform, load) -> working loop -> closeOB
    deviceName = '01CF6A61' 
-   path = ""
+   path = "" # path to save the calibration file to
    
    initializeOB1(deviceName)
    #addSensor(1) #if we want to add the MFS to ch1
+   performCaibration(path)
+   
+   
    
 
 if __name__ == "__main__":
