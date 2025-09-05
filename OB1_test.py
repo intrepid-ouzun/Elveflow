@@ -152,12 +152,13 @@ def readMFS(instrID: int, channel: int):
     regulatorData = c_double()
     sensorData = c_double()
     
-    error = OB1_Get_Data(instrID, channel, byref(regulatorData), byref(sesensorDatans))
+    error = OB1_Get_Data(instrID, channel, byref(regulatorData), byref(sensorData))
     if error != 0:
         raise RuntimeError(f"OB1_Get_Data error: {error}")
     return regulatorData.value, sensorData.value
     
 
+def feed
 #PID feedbck function / depositing a certain volmume function
     
 #keep adding working loop functions to test  
