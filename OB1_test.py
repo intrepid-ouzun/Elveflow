@@ -7,6 +7,7 @@ from array import array
 from ctypes import *
 from enum import IntEnum
 import json, pathlib
+import time
 
 from Elveflow32 import *
 
@@ -18,7 +19,7 @@ from enum import IntEnum
 # the resolution from MFS sensor is up to 16 bits since it uses I2C communication, can specify what to read when adding a sensor
 
 #OB1 constants
-REGULATOR_TYPE = 4
+REGULATOR_TYPE = 0 #SET 0 FOR OB1 MK4!
 CALIB_LEN = 1000 #length of the calibration table for OB1 is always 1000
 
 #MFS constants
@@ -101,7 +102,7 @@ def closeOB1():
         print("OB1 closed.")
         return 0
     
-def addSensor(channel: int, calibration: int=IPA_CALIBRATION, resolution: int=MFS_RESOLUTION):     
+def addSensor(channel: int, calibration: int=H20_CALIBRATION, resolution: int=MFS_RESOLUTION):     
     global Instr_ID
     error = OB1_Add_Sens(Instr_ID, channel, SENSOR_TYPE, 1, calibration, resolution, 0) #voltage level?
     #For digital sensors, the sensor type is automatically detected during this function call.
@@ -110,30 +111,55 @@ def addSensor(channel: int, calibration: int=IPA_CALIBRATION, resolution: int=MF
     _raise_if_error(error, "OB1: addSensor")
 
 def performCaibration(path: str):
+    
+    #error checking
+    if not os.path.isdir(path):
+        raise RuntimeError(f"Directory does not exist: {path}")
+    # Directory must be writable
+    if not os.access(path, os.W_OK):
+        raise RuntimeError(f"Directory is not writable: {path}")
+    if not os.path.isfile(path):
+        raise RuntimeError(f"File does not exist: {path}")
+    # Path must be ASCII encodable
+    try:
+        encoded = path.encode('ascii')
+    except UnicodeEncodeError:
+        raise RuntimeError("Path contains non-ASCII characters, not supported by OB1 SDK.")
+
+    path_buf = create_string_buffer(path.encode('ascii'))  # char path[] (array), NUL added automatically
+
+    start = time.time() # Start timer
+
     OB1_Calib (Instr_ID.value)
-    error = OB1_Calib_Save(path.value, path.encode('ascii'))
-    print(f'calib saved in {path}')
+    error = OB1_Calib_Save(path.value, path_buf)
+    
+    elapsed = time.time() - start
+    print(f"Calibration completed in {elapsed:.2f} seconds")
+    print(f'Calibration file saved at: {path}')
     #print(f'OB1_performCalibration -> error: {error}')
     _raise_if_error(error, "OB1: performCalibration")
+    
 
     
 def loadCalibration(path: str):
     """
-    Load calibration from a JSON file into the 1000-double buffer.
-    JSON must contain a list of 1000 floats.
-    """
-    
-    calibration_path = pathlib.Path(path)
-    
+    Load a calibration file from the specified path.
+    Input must be a raw string e.g. r"C:\Users\oykuz\calib.txt"
+    """    
     #error checking
-    if not calibration_path.exists():
-        raise FileNotFoundError(f"No calibration file at '{calibration_path}'")
-    with calibration_path.open("r", encoding="utf-8") as f:
-        data = json.load(f)  
-    if not isinstance(data, list) or len(data) != CALIB_LEN:
-        raise ValueError(f"Calibration JSON must have {CALIB_LEN} numbers, got {len(data)}")
-    
-    error = OB1_Calib_Load(Instr_ID.value, calibration_path.encode('ascii'))
+    if not os.path.isdir(path):
+        raise RuntimeError(f"Directory does not exist: {path}")
+    if not os.path.isfile(path):
+        raise RuntimeError(f"File does not exist: {path}")
+    # Path must be ASCII encodable
+    try:
+        encoded = path.encode('ascii')
+    except UnicodeEncodeError:
+        raise RuntimeError("Path contains non-ASCII characters, not supported by OB1 SDK.")
+
+    path_buf = create_string_buffer(path.encode('ascii'))  # char path[] (array), NUL added automatically
+
+    error = OB1_Calib_Load(Instr_ID.value, path_buf)
     #print(f"OB1_loadCalibration -> error: {error}").strip()
     _raise_if_error(error, "OB1: loadCalibration")
     
@@ -158,7 +184,6 @@ def readMFS(instrID: int, channel: int):
     return regulatorData.value, sensorData.value
     
 
-def feed
 #PID feedbck function / depositing a certain volmume function
     
 #keep adding working loop functions to test  
@@ -167,8 +192,8 @@ def feed
 def main():
     
    #typical workflow would be initialize -> addSensor -> calibrate (perform, load) -> working loop -> closeOB
-   deviceName = '01CF6A61' 
-   path = "" # path to save the calibration file to
+   deviceName = 'OB1_113433' 
+   path = "C:/Users/oykuz/Calibration/Calib.txt" # path to save the calibration file to
    
    initializeOB1(deviceName)
    #addSensor(1) #if we want to add the MFS to ch1
