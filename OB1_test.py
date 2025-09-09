@@ -1,17 +1,8 @@
-import importlib
-import json
-import pathlib
-import sys
+import sys, os
 from ctypes import byref, c_double, c_int32
 from dataclasses import dataclass
 from enum import IntEnum
-<<<<<<< HEAD
-import json, pathlib
 import time
-=======
-from typing import Tuple
-import os
->>>>>>> 1295865b8ff4177bf2b4e953a2bea2f16f75dcb7
 
 from Elveflow32 import *
 
@@ -36,9 +27,7 @@ CALIB_LEN = 1000 #length of the calibration table for OB1 is always 1000
 H20_CALIBRATION = 0
 IPA_CALIBRATION = 1 # can create a class for these? meh
 MFS_SENSOR_TYPE = 5
-MFS_DEFAULT_RESOLUTION = 7 # [0..7] => [9..16] bits
-
-Instr_ID = c_int32(-1)
+MFS_RESOLUTION = 7 # [0..7] => [9..16] bits
 
 # error codes from the end of the SDK User Guide - probably won't need all of them
 # more error codes can be found: https://www.ni.com/docs/en-US/bundle/labview-api-ref/page/errors/general-labview-error-codes.html
@@ -79,26 +68,54 @@ ERROR_MESSAGES: dict[ErrorCode, str] = {
     ErrorCode.MSRD_REMOTE_LOOP_NOT_EXECUTED:        "MSRD remote loop has not been executed",
 }
 
-def _raise_if_error(code: int, where: str):
-    if isinstance(code, int) and code != 0:
-        try:
-            msg = ERROR_MESSAGES[ErrorCode(code)]
-        except Exception:
-            msg = f"Unrecognized error code {code}"
-        raise RuntimeError(f"{where}: {msg} (code {code})")
+
+def loadElveflowModule(dll_dir: str, py_dir: str):
+    """ 
+    A helper function to load the DLL and Python SDK to path to be called during OB1 object initialization.
+
+    Args:
+        dll_dir (str): path to Elveflow64.lib in str format
+        py_dir (str): path to Elveflow64.py in str format
+        
+        e.g. 
+        dll_dir = 'C:/Users/oykuz/ESI_V3_10_02/SDK_V3_10_01/SDK_V3_10_01/DLL/DLL64'
+        py_dir = 'C:/Users/oykuz/ESI_V3_10_02/SDK_V3_10_01/SDK_V3_10_01/DLL/Python/Python_64'
+
+    """
+    dll_dir = os.path.abspath(dll_dir)
+    py_dir  = os.path.abspath(py_dir)
+
+    if not os.path.isdir(dll_dir):
+        raise FileNotFoundError(f"DLL directory not found: {dll_dir}")
+    if not os.path.isdir(py_dir):
+        raise FileNotFoundError(f"Python wrapper directory not found: {py_dir}")
+
+    if py_dir not in sys.path:
+        sys.path.append(py_dir)
+        
+    if dll_dir not in sys.path:
+        sys.path.append(dll_dir)
+        
+    return 0
+
     
    
 class OB1:
     """
-    OB1: a high-level, object‑oriented wrapper around the Elveflow OB1 SDK.    
+    OB1: a high-level wrapper around the Elveflow OB1 SDK.    
     
     Parameters
     ----------
     device_name : str                       Instrument name from NI‑MAX (e.g. '113433').
-    regulators : tuple[int, int, int, int]  Regulator installed (4, 4, 4, 4) for us
+    regulators : tuple[int, int, int, int]  Regulator codes are always (0, 0, 0, 0) for OB1 MK4 athough the regulator code is 4 for -900,1000 mbar
     dll_path : str                             
     sdk_path : str                          Root path that contains SDK and DLL folders like DLL32/, DLL64/, Python_32/, Python_64/.
     """
+    
+    __slots__ = (
+        "device_name", "regulators", "_dll_path", "_sdk_path",
+        "_lib", "_connected", "__Instr_Id"
+    )
     
     def __init__(
         self,
@@ -116,82 +133,127 @@ class OB1:
             raise ValueError("regulators must be 4 integers (one per channel)")
         if any(x < 0 or x > 5 for x in regs):
             raise ValueError("regulator codes must be between 0 and 5 based on the pressure range of the channel")
-
-
+        
         self.device_name = device_name
         self.regulators = regs
-        self._instr_id = c_int32(-1)
         self._connected = False
+        self._instr_id = c_int32(-1)
 
         # --- Paths ---
         self._dll_path = dll_path
         self._sdk_path = sdk_path
 
-        if self._dll_path is None or self._sdk_path is None:
-            raise ValueError("Both dll_path and sdk_path must be provided")
-
-        if not os.path.isdir(self._dll_path):
-            raise FileNotFoundError(f"SDK DLL directory not found: {self._dll_path}")
-        if not os.path.isdir(self._sdk_path):
-            raise FileNotFoundError(f"SDK Python directory not found: {self._sdk_path}")
- 
-            
-    def connectOB1(self) -> int:
-    
-<<<<<<< HEAD
-def addSensor(channel: int, calibration: int=H20_CALIBRATION, resolution: int=MFS_RESOLUTION):     
-    global Instr_ID
-    error = OB1_Add_Sens(Instr_ID, channel, SENSOR_TYPE, 1, calibration, resolution, 0) #voltage level?
-    #For digital sensors, the sensor type is automatically detected during this function call.
-=======
-        """
-            Try to connect to OB1 
-            Returns the Instrument ID if successful, -1 if connection fails.
-        """
+        # load SDK module using the separate loader function
+        error = loadElveflowModule(self._dll_path, self._sdk_path)
         
-        if self._connected:
-            return self._instr_id.value  # already connected, return existing ID
+        error = OB1_Initialization(self.device_name.encode('ascii'),0,0,0,0,byref(self._instr_id)) 
+        self._check(err, "OB1Initialization")
 
-        regulators = self.regulators
-        instrument_ID = c_int32()
-        
-        error = OB1_Initialization(self.device_name.encode('ascii'), regulators[0], regulators[1], regulators[2], regulators[3], byref(instrument_ID)) 
->>>>>>> 1295865b8ff4177bf2b4e953a2bea2f16f75dcb7
-    
-        if error != 0:  # nonzero means error, return the specific code
-                return error
-        
-        #print(f"initializeOB1 -> error: {error}, OB1 ID: {Instr_ID.value}")
-        #_raise_if_error(error, "OB1_Initialization")
-
-        # Success
-        self._instr_id = instrument_ID
         self._connected = True
+    
+    def addSensor(self, channel: int, calibration: int=H20_CALIBRATION, resolution: int=MFS_RESOLUTION)->int:     
+        error = OB1_Add_Sens(self._instr_id, channel, MFS_SENSOR_TYPE, 1, calibration, resolution, 0)
+        #For digital sensors, the sensor type is automatically detected during this function call.
+        
+        self._check(err, "OB1_Add_Sensor")
         
         return self._instr_id.value
     
     def closeOB1(self) -> int:
         if not self._connected:
-            return
-        error = self._sdk.OB1_Destructor(self._instr_id.value)
+            return -1
+        #error = self._sdk.OB1_Destructor(self._instr_id.value)
+        error = OB1_Destructor(self._instr_id.value)
         self._check(error, "OB1_Destructor")
         self._instr_id = c_int32(-1)
         self._connected = False
         
-        return error
+        return self._instr_id.value
     
     def addSensor(self, channel: int, calibration: int=IPA_CALIBRATION, resolution: int=MFS_RESOLUTION) -> int:     
         self._require_connection()
-        error = self._sdk.OB1_Add_Sens(self._instr_id, channel, MFS_SENSOR_TYPE, 1, int(calibration), int(resolution), 0)
+        error = OB1_Add_Sens(self._instr_id.value, channel, MFS_SENSOR_TYPE, 1, int(calibration), int(resolution), 0)
         #For digital sensors, the sensor type is automatically detected during this function call.
         self._check(error, "OB1_Add_Sens")
-        return error
+        return self._instr_id.value
+    
+    def performCaibration(self, path: str):
+    
+        #error checking
+        if not os.path.isdir(path):
+            raise RuntimeError(f"Directory does not exist: {path}")
+        # Directory must be writable
+        if not os.access(path, os.W_OK):
+            raise RuntimeError(f"Directory is not writable: {path}")
+        if not os.path.isfile(path):
+            raise RuntimeError(f"File does not exist: {path}")
+        # Path must be ASCII encodable
+        try:
+            encoded = path.encode('ascii')
+        except UnicodeEncodeError:
+            raise RuntimeError("Path contains non-ASCII characters, not supported by OB1 SDK.")
+
+        path_buf = create_string_buffer(path.encode('ascii'))  # char path[] (array), NUL added automatically
+
+        start = time.time() # Start timer
+
+        OB1_Calib (self._instr_id.value)
+        error = OB1_Calib_Save(self._instr_id.value, path_buf)
+        
+        elapsed = time.time() - start
+        print(f"Calibration completed in {elapsed:.2f} seconds")
+        print(f'Calibration file saved at: {path}')
+        #print(f'OB1_performCalibration -> error: {error}')
+        _raise_if_error(error, "OB1: performCalibration")
+        
+    def loadCalibration(self, path: str):
+        """
+        Load a calibration file from the specified path.
+        Input must be a raw string e.g. r"C:\Users\oykuz\calib.txt"
+        """    
+        #error checking
+        if not os.path.isdir(path):
+            raise RuntimeError(f"Directory does not exist: {path}")
+        if not os.path.isfile(path):
+            raise RuntimeError(f"File does not exist: {path}")
+        # Path must be ASCII encodable
+        try:
+            encoded = path.encode('ascii')
+        except UnicodeEncodeError:
+            raise RuntimeError("Path contains non-ASCII characters, not supported by OB1 SDK.")
+
+        path_buf = create_string_buffer(path.encode('ascii'))  # char path[] (array), NUL added automatically
+
+        error = OB1_Calib_Load(self._instr_id.value, path_buf)
+        #print(f"OB1_loadCalibration -> error: {error}").strip()
+        self._check(error, "OB1: loadCalibration")
+        
+    
+    def setPressure(self, channel: int, pressure: float = 0):
+    
+        if (pressure < -900 or pressure > 1000):
+            print("Outside the pressure range of [-900,1000] mbar")
+            return -1
+        
+        error = OB1_Set_Press(self._instr_id.value, c_int32(channel), c_double(pressure)) 
+        #print(f"OB1_setPressure -> error: {error}").strip()
+        self._check(error, "OB1: setPressure")
+
+    def readMFS(instrID: int, channel: int):
+        regulatorData = c_double()
+        sensorData = c_double()
+        
+        error = OB1_Get_Data(instrID, channel, byref(regulatorData), byref(sensorData))
+        if error != 0:
+            raise RuntimeError(f"OB1_Get_Data error: {error}")
+        return regulatorData.value, sensorData.value
+    
     
 
-    def _require_connection(self) -> None:
+    def _require_connection(self):
         if not self._connected or self._instr_id.value < 0:
             raise RuntimeError("OB1 not connected. Call connect() first.")
-    
+        
     @staticmethod
     def _check(code: int, where: str) -> None:
         if isinstance(code, int) and code != 0:
@@ -201,80 +263,11 @@ def addSensor(channel: int, calibration: int=H20_CALIBRATION, resolution: int=MF
                 msg = f"Unrecognized error code {code}"
             raise RuntimeError(f"{where}: {msg} (code {code})")
 
+        
 
-def performCaibration(path: str):
-    
-    #error checking
-    if not os.path.isdir(path):
-        raise RuntimeError(f"Directory does not exist: {path}")
-    # Directory must be writable
-    if not os.access(path, os.W_OK):
-        raise RuntimeError(f"Directory is not writable: {path}")
-    if not os.path.isfile(path):
-        raise RuntimeError(f"File does not exist: {path}")
-    # Path must be ASCII encodable
-    try:
-        encoded = path.encode('ascii')
-    except UnicodeEncodeError:
-        raise RuntimeError("Path contains non-ASCII characters, not supported by OB1 SDK.")
 
-    path_buf = create_string_buffer(path.encode('ascii'))  # char path[] (array), NUL added automatically
 
-    start = time.time() # Start timer
 
-    OB1_Calib (Instr_ID.value)
-    error = OB1_Calib_Save(path.value, path_buf)
-    
-    elapsed = time.time() - start
-    print(f"Calibration completed in {elapsed:.2f} seconds")
-    print(f'Calibration file saved at: {path}')
-    #print(f'OB1_performCalibration -> error: {error}')
-    _raise_if_error(error, "OB1: performCalibration")
-    
-
-    
-def loadCalibration(path: str):
-    """
-    Load a calibration file from the specified path.
-    Input must be a raw string e.g. r"C:\Users\oykuz\calib.txt"
-    """    
-    #error checking
-    if not os.path.isdir(path):
-        raise RuntimeError(f"Directory does not exist: {path}")
-    if not os.path.isfile(path):
-        raise RuntimeError(f"File does not exist: {path}")
-    # Path must be ASCII encodable
-    try:
-        encoded = path.encode('ascii')
-    except UnicodeEncodeError:
-        raise RuntimeError("Path contains non-ASCII characters, not supported by OB1 SDK.")
-
-    path_buf = create_string_buffer(path.encode('ascii'))  # char path[] (array), NUL added automatically
-
-    error = OB1_Calib_Load(Instr_ID.value, path_buf)
-    #print(f"OB1_loadCalibration -> error: {error}").strip()
-    _raise_if_error(error, "OB1: loadCalibration")
-    
-    
-def setPressure(channel: int, pressure: float = 0):
-    
-    if (pressure < -900 or pressure > 1000):
-        print("Outside the pressure range of [-900,1000] mbar")
-        return -1
-    
-    error = OB1_Set_Press(Instr_ID.value, c_int32(channel), c_double(pressure)) 
-    #print(f"OB1_setPressure -> error: {error}").strip()
-    _raise_if_error(error, "OB1: setPressure")
-
-def readMFS(instrID: int, channel: int):
-    regulatorData = c_double()
-    sensorData = c_double()
-    
-    error = OB1_Get_Data(instrID, channel, byref(regulatorData), byref(sensorData))
-    if error != 0:
-        raise RuntimeError(f"OB1_Get_Data error: {error}")
-    return regulatorData.value, sensorData.value
-    
 
 #PID feedbck function / depositing a certain volmume function
     
