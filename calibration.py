@@ -70,7 +70,7 @@ error=OB1_Calib_Load (Instr_ID.value, path_buf)
 #     #eg. i =278 -> display = 222 mbar  //  i = 309 -> display = 252 mbar
 #     time.sleep(0.1)  # Add a short delay to allow pressure to stabilize
 
-error = OB1_Set_Press(Instr_ID.value, channel_MFS, c_double(-500)) #reset the pressure to 0 at the end of the sweep
+error = OB1_Set_Press(Instr_ID.value, channel_MFS, c_double(0)) #reset the pressure to 0 at the end of the sweep
 
 
 # ---- PID CONTROL ---
@@ -105,9 +105,11 @@ for i in range(50):
 print("Sensor readings (ul/min):", [sensor_readings[i] for i in range(50)])
 print("Regulator readings (mbar):", [regulator_readings[i] for i in range(50)])
 
+#TODO: Try a loop to adjust the PI parameters based on the flow recorded, and a better way of recording the readings over a longer period of time
+#TODO: once these two are confirmed, add the logic to the MUX code.
+
+
 error = PID_Set_Running_Remote(Instr_ID.value, channel_MFS, c_int32(0)) #stop PID control
-
-
 error = OB1_Destructor(Instr_ID.value)
 
 
