@@ -150,14 +150,7 @@ class OB1:
         self._check(err, "OB1Initialization")
 
         self._connected = True
-    
-    def addSensor(self, channel: int, calibration: int=H20_CALIBRATION, resolution: int=MFS_RESOLUTION)->int:     
-        error = OB1_Add_Sens(self._instr_id, channel, MFS_SENSOR_TYPE, 1, calibration, resolution, 0)
-        #For digital sensors, the sensor type is automatically detected during this function call.
-        
-        self._check(err, "OB1_Add_Sensor")
-        
-        return self._instr_id.value
+
     
     def closeOB1(self) -> int:
         if not self._connected:
