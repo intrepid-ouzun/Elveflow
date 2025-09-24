@@ -139,28 +139,26 @@ def existing_calibration(instr_id, calib_path, verbose=True):
             print(f"Exception during calibration load: {e}")
         return False, -1
 
-def ramp_and_maintain_pressure(instr_id, channel, pressure_mbar, duration_seconds, 
-                              sample_dt=0.1, ramp_time=0.0, verbose=True):
+def ramp_pressure(instr_id, channel, pressure_mbar, ramp_time=0.0, 
+                 sample_dt=0.1, verbose=True):
     """
-    Set pressure on a channel for a specified duration with optional ramp-up.
+    Ramp up pressure on a channel to a target value.
     
     Args:
         instr_id: OB1 instrument ID
         channel: Channel to control
         pressure_mbar: Target pressure to set in mbar
-        duration_seconds: Duration to maintain pressure in seconds
-        sample_dt: Sampling interval in seconds (default: 0.1)
         ramp_time: Time to ramp up pressure in seconds (0 = immediate, default: 0.0)
+        sample_dt: Sampling interval in seconds (default: 0.1)
         verbose: Print detailed progress information
     
     Returns:
-        dict: Pressure run results including statistics
+        dict: Pressure ramp results including statistics
     """
     if verbose:
-        print(f"\n=== SET PRESSURE FOR DURATION ===")
+        print(f"\n=== RAMP PRESSURE ===")
         print(f"Channel: {channel.value}")
         print(f"Target Pressure: {pressure_mbar} mbar")
-        print(f"Duration: {duration_seconds} seconds")
         print(f"Ramp Time: {ramp_time} seconds")
         print(f"Sampling interval: {sample_dt} seconds")
         print("-" * 40)
@@ -223,7 +221,7 @@ def ramp_and_maintain_pressure(instr_id, channel, pressure_mbar, duration_second
                 time.sleep(sample_dt)
             
             if verbose:
-                print(f"Ramp completed. Maintaining {pressure_mbar} mbar...")
+                print(f"Ramp completed. Target pressure {pressure_mbar} mbar reached.")
         else:
             # Immediate pressure setting
             if verbose:
@@ -236,58 +234,12 @@ def ramp_and_maintain_pressure(instr_id, channel, pressure_mbar, duration_second
                 return None
             
             if verbose:
-                print("Pressure set. Monitoring...")
-        
-        # Monitor for specified duration (excluding ramp time)
-        hold_start_time = time.time()
-        while (time.time() - start_time) < (duration_seconds + ramp_time):
-            current_time = time.time()
-            elapsed_time = current_time - start_time
-            elapsed_hold = current_time - hold_start_time
-            
-            # Read current pressure and flow
-            sen = c_double()
-            reg = c_double()
-            error = OB1_Get_Data(instr_id, channel, byref(reg), byref(sen))
-            
-            if error == 0:
-                current_pressure = reg.value  # mbar
-                current_flow = sen.value  # µL/min
-                
-                # Log data
-                time_log.append(elapsed_time)
-                pressure_log.append(current_pressure)
-                flow_log.append(current_flow)
-                target_pressure_log.append(pressure_mbar)  # Target is now constant
-                
-                # Print progress every 5 seconds (only during hold phase)
-                if verbose and elapsed_hold > 0 and int(elapsed_hold) % 5 == 0:
-                    remaining_time = duration_seconds - elapsed_hold
-                    if remaining_time > 0:
-                        progress = (elapsed_hold / duration_seconds) * 100
-                        print(f"Hold Progress: {progress:.1f}% - Time: {elapsed_hold:.1f}s/{duration_seconds}s - "
-                              f"Pressure: {current_pressure:.1f} mbar - Flow: {current_flow:.1f} µL/min - "
-                              f"Remaining: {remaining_time:.1f}s")
-            else:
-                if verbose:
-                    print(f"Error reading sensor data: {error}")
-                break
-            
-            # Sleep for sampling interval
-            time.sleep(sample_dt)
+                print(f"Pressure set to {pressure_mbar} mbar.")
     
     except KeyboardInterrupt:
         if verbose:
-            print("\nPressure run interrupted by user")
+            print("\nPressure ramp interrupted by user")
         return None
-    
-    finally:
-        # Reset pressure to zero
-        if verbose:
-            print("Resetting pressure to zero...")
-        error = OB1_Set_Press(instr_id, channel, c_double(0))
-        if error != 0 and verbose:
-            print(f"Error resetting pressure: {error}")
     
     # Calculate final statistics
     actual_duration = time.time() - start_time
@@ -309,7 +261,6 @@ def ramp_and_maintain_pressure(instr_id, channel, pressure_mbar, duration_second
     # Prepare results
     results = {
         'target_pressure': pressure_mbar,
-        'target_duration': duration_seconds,
         'ramp_time': ramp_time,
         'actual_duration': actual_duration,
         'avg_pressure': avg_pressure,
@@ -326,11 +277,10 @@ def ramp_and_maintain_pressure(instr_id, channel, pressure_mbar, duration_second
     }
     
     if verbose:
-        print(f"\n=== PRESSURE RUN RESULTS ===")
+        print(f"\n=== PRESSURE RAMP RESULTS ===")
         print(f"Target Pressure: {pressure_mbar:.1f} mbar")
         print(f"Ramp Time: {ramp_time:.1f} seconds")
-        print(f"Hold Duration: {duration_seconds:.1f} seconds")
-        print(f"Total Duration: {actual_duration:.2f} seconds")
+        print(f"Actual Duration: {actual_duration:.2f} seconds")
         print(f"Average Pressure: {avg_pressure:.1f} mbar")
         print(f"Pressure Range: {min_pressure:.1f} - {max_pressure:.1f} mbar")
         print(f"Average Flow: {avg_flow:.1f} µL/min")
@@ -476,6 +426,44 @@ def stop_flow(instr_id, channel, verbose=True):
             print(f"Exception during flow stop: {e}")
         return False
 
+
+def cleanup_MUX_DRI(MUX_DRI_Instr_Id, verbose=True):
+    """
+    Cleanup and close MUX DRI instrument.
+    
+    Args:
+        MUX_DRI_Instr_Id: MUX DRI instrument ID
+        verbose: Print progress information
+    
+    Returns:
+        bool: Success status
+    """
+    if verbose:
+        print(f"\n=== CLEANUP MUX DRI ===")
+        print(f"MUX Instrument ID: {MUX_DRI_Instr_Id.value}")
+        print("-" * 25)
+    
+    try:
+        # Destruct MUX DRI
+        if verbose:
+            print("Destructing MUX DRI...")
+        
+        error = MUX_DRI_Destructor(MUX_DRI_Instr_Id.value)
+        if error != 0:
+            if verbose:
+                print(f"Error destructing MUX DRI: {error}")
+            return False
+        
+        if verbose:
+            print("✓ MUX DRI cleaned up successfully")
+            print("=" * 25)
+        
+        return True
+    
+    except Exception as e:
+        if verbose:
+            print(f"Exception during MUX DRI cleanup: {e}")
+        return False
 
 def closeOB1(instr_id, verbose=True):
     """
@@ -634,7 +622,7 @@ def set_MUX_DRI_valve(MUX_DRI_Instr_Id, valve_position, rotation=0, verbose=True
     if verbose:
         print(f"\n=== SET MUX DRI VALVE ===")
         print(f"MUX Instrument ID: {MUX_DRI_Instr_Id.value}")
-        print(f"Valve Position: {valve_position}")
+        print(f"Valve Position to be set: {valve_position}")
         print(f"Rotation: {rotation} ({'shortest' if rotation == 0 else 'clockwise' if rotation == 1 else 'counterclockwise'})")
         print("-" * 25)
     
@@ -651,6 +639,17 @@ def set_MUX_DRI_valve(MUX_DRI_Instr_Id, valve_position, rotation=0, verbose=True
             return False, error
         
         if verbose:
+            # Verify the valve position was set correctly
+            print("Verifying valve position...")
+            success_verify, current_position, error_verify = get_MUX_DRI_valve(MUX_DRI_Instr_Id, verbose=False)
+            
+            if success_verify and current_position == valve_position:
+                print(f"✓ Valve successfully set to position {valve_position} (verified)")
+            elif success_verify:
+                print(f"⚠ Warning: Valve position mismatch - Expected: {valve_position}, Actual: {current_position}")
+            else:
+                print(f"⚠ Warning: Could not verify valve position (error: {error_verify})")
+            
             print(f"Valve set to position {valve_position} successfully")
             print("=" * 25)
         
@@ -903,14 +902,14 @@ def plot_channel_data(results, save_plot=True, show_plot=True, filename=None):
     fig.suptitle(f'Channel {results["channel"]} - Pressure and Flow Rate Monitoring', 
                  fontsize=16, fontweight='bold')
     
-    # Convert time to minutes for better readability
-    time_minutes = [t/60.0 for t in results['time_log']]
+    # Use time in seconds directly
+    time_seconds = results['time_log']
     
     # Plot 1: Pressure
-    ax1.plot(time_minutes, results['pressure_log'], 'b-', linewidth=2, label='Pressure')
+    ax1.plot(time_seconds, results['pressure_log'], 'b-', linewidth=2, label='Pressure')
     ax1.axhline(y=results['avg_pressure'], color='r', linestyle='--', alpha=0.7, 
                 label=f'Average: {results["avg_pressure"]:.1f} mbar')
-    ax1.fill_between(time_minutes, results['pressure_log'], alpha=0.3, color='blue')
+    ax1.fill_between(time_seconds, results['pressure_log'], alpha=0.3, color='blue')
     ax1.set_ylabel('Pressure (mbar)', fontsize=12, fontweight='bold')
     ax1.set_title('Pressure vs Time', fontsize=14, fontweight='bold')
     ax1.grid(True, alpha=0.3)
@@ -923,11 +922,11 @@ def plot_channel_data(results, save_plot=True, show_plot=True, filename=None):
              verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
     
     # Plot 2: Flow Rate
-    ax2.plot(time_minutes, results['flow_log'], 'g-', linewidth=2, label='Flow Rate')
+    ax2.plot(time_seconds, results['flow_log'], 'g-', linewidth=2, label='Flow Rate')
     ax2.axhline(y=results['avg_flow'], color='r', linestyle='--', alpha=0.7, 
                  label=f'Average: {results["avg_flow"]:.1f} µL/min')
-    ax2.fill_between(time_minutes, results['flow_log'], alpha=0.3, color='green')
-    ax2.set_xlabel('Time (minutes)', fontsize=12, fontweight='bold')
+    ax2.fill_between(time_seconds, results['flow_log'], alpha=0.3, color='green')
+    ax2.set_xlabel('Time (seconds)', fontsize=12, fontweight='bold')
     ax2.set_ylabel('Flow Rate (µL/min)', fontsize=12, fontweight='bold')
     ax2.set_title('Flow Rate vs Time', fontsize=14, fontweight='bold')
     ax2.grid(True, alpha=0.3)
@@ -1266,12 +1265,16 @@ def _continuous_logging_worker(instr_id, channel, sample_dt, verbose):
     if verbose:
         print("Continuous logging worker started")
     
+    consecutive_errors = 0
+    max_consecutive_errors = 5
+    
     while _logging_active:
         try:
             # Read current data
             success, pressure, flow_rate, error = read_channel_data(instr_id, channel, verbose=False)
             
             if success:
+                consecutive_errors = 0  # Reset error counter on success
                 current_time = time.time()
                 elapsed_time = current_time - _logging_data['start_time']
                 
@@ -1287,19 +1290,32 @@ def _continuous_logging_worker(instr_id, channel, sample_dt, verbose):
                     print(f"Logged {_logging_data['samples']} samples - "
                           f"P: {pressure:.1f} mbar, F: {flow_rate:.1f} µL/min")
             else:
+                consecutive_errors += 1
                 if verbose:
-                    print(f"Error reading data: {error}")
-                break
+                    print(f"Error reading data (attempt {consecutive_errors}): {error}")
+                
+                # Stop logging if too many consecutive errors
+                if consecutive_errors >= max_consecutive_errors:
+                    if verbose:
+                        print(f"Stopping logging due to {max_consecutive_errors} consecutive errors")
+                    break
             
             time.sleep(sample_dt)
             
         except Exception as e:
+            consecutive_errors += 1
             if verbose:
-                print(f"Exception in logging worker: {e}")
-            break
+                print(f"Exception in logging worker (attempt {consecutive_errors}): {e}")
+            
+            if consecutive_errors >= max_consecutive_errors:
+                if verbose:
+                    print(f"Stopping logging due to {max_consecutive_errors} consecutive exceptions")
+                break
+            
+            time.sleep(sample_dt)  # Wait before retrying
     
     if verbose:
-        print("Continuous logging worker stopped")
+        print(f"Continuous logging worker stopped (collected {_logging_data['samples']} samples)")
 
 def get_logging_status():
     """
@@ -1383,7 +1399,7 @@ def main():
     MUX_DRI_Instr_Id = c_int32(-1)
     
     print("=== INITIALIZING OB1 ===")
-    error = OB1_Initialization('113433'.encode('ascii'), 0, 0, 0, 0, byref(instr_id))
+    error = OB1_Initialization('OB1'.encode('ascii'), 0, 0, 0, 0, byref(instr_id))
     if error != 0:
         print(f"Error initializing OB1: {error}")
         return
@@ -1399,59 +1415,197 @@ def main():
     
     # Add sensor
     print("\n=== ADDING SENSOR ===")
-    error = OB1_Add_Sens(instr_id.value, channel, 5, 1, 1, 7, 0)
+    error = OB1_Add_Sens(instr_id.value, channel.value, 5, 1, 1, 7, 0)
     if error != 0:
         print(f"Error adding sensor: {error}")
         return
     print("✓ Sensor added successfully")
     
-    # Start continuous logging
-    print("\n=== STARTING CONTINUOUS LOGGING ===")
-    start_continuous_logging(instr_id, channel, sample_dt=1.0, verbose=True)
-    
     try:
-        # Perform calibration and save it
-        print("\n=== PERFORMING CALIBRATION ===")
-        base_path = r"C:\Users\oykuz\calibration.calib"
-        success, saved_path, error_code = calibrate_new(
+        # Load existing calibration first
+        print("\n=== LOADING EXISTING CALIBRATION ===")
+        calibration_path = r"C:\Users\oykuz\calibration_20250924.calib"
+        success = existing_calibration(
             instr_id.value, 
-            base_path, 
+            calibration_path, 
             verbose=True
         )
         
         if not success:
-            print(f"✗ Calibration failed with error: {error_code}")
+            print(f"✗ Calibration loading failed")
             return
         
-        print(f"✓ Calibration completed and saved to: {saved_path}")
+        print(f"✓ Calibration loaded successfully from: {calibration_path}")
         
-        # Set pressure to 500 mbar over 180 seconds
-        print("\n=== SETTING PRESSURE RAMP ===")
-        print("Setting pressure to 500 mbar over 180 seconds...")
-        success = ramp_and_maintain_pressure(
+        # Home MUX DRI before starting pressure operations
+        print("\n=== HOMING MUX DRI ===")
+        success, answer, error_code = home_MUX_DRI(MUX_DRI_Instr_Id, verbose=True)
+        time.sleep(5.0)  # 2 second buffer
+
+        if not success:
+            print(f"✗ MUX homing failed with error: {error_code}")
+            return
+        
+        print(f"✓ MUX DRI homed successfully")
+        
+        # Set MUX valve to position 1
+        print("\n=== SETTING MUX VALVE TO POSITION 1 ===")
+        success, error_code = set_MUX_DRI_valve(MUX_DRI_Instr_Id, 1, rotation=0, verbose=True)
+        
+        if not success:
+            print(f"✗ MUX valve setting failed with error: {error_code}")
+            return
+        
+        print(f"✓ MUX valve set to position 1")
+        
+        # Add buffer time for valve to settle
+        time.sleep(3.0)  # 3 second buffer
+        
+        # Verify valve position
+        print("Verifying valve position...")
+        success, current_position, error_code = get_MUX_DRI_valve(MUX_DRI_Instr_Id, verbose=True)
+        if success:
+            print(f"✓ Current valve position: {current_position}")
+        else:
+            print(f"Warning: Could not read valve position (error: {error_code})")
+
+        print("Setting pressure to zero...")
+        error = OB1_Set_Press(instr_id.value, channel, c_double(0))
+        # # Perform calibration and save it
+        # print("\n=== PERFORMING CALIBRATION ===")
+        # base_path = r"C:\Users\oykuz\calibration.calib"
+        # success, saved_path, error_code = calibrate_new(
+        #     instr_id.value, 
+        #     base_path, 
+        #     verbose=True
+        # )
+        # 
+        # if not success:
+        #     print(f"✗ Calibration failed with error: {error_code}")
+        #     return
+        # 
+        # print(f"✓ Calibration completed and saved to: {saved_path}")
+        
+        # # Ramp pressure to 100 mbar over 100 seconds (COMMENTED OUT)
+        # print("\n=== RAMPING PRESSURE ===")
+        # print("Ramping pressure to 100 mbar over 100 seconds...")
+        # success = ramp_pressure(
+        #     instr_id, 
+        #     channel, 
+        #     pressure_mbar=100.0, 
+        #     ramp_time=100.0,  # Ramp over 80 seconds
+        #     sample_dt=1.0, 
+        #     verbose=True
+        # )
+        # 
+        # if not success:
+        #     print("✗ Pressure ramp failed")
+        #     return
+        # else:
+        #     print("✓ Pressure ramp completed successfully")
+        
+        # Switch to valve 12
+        print("\n=== SWITCHING TO VALVE 12 ===")
+        success, error_code = set_MUX_DRI_valve(MUX_DRI_Instr_Id, 12, rotation=0, verbose=True)
+        
+        if not success:
+            print(f"✗ MUX valve switching failed with error: {error_code}")
+            return
+        
+        print(f"✓ MUX valve switched to position 12")
+        
+        # Add buffer time for valve to settle
+        time.sleep(3.0)  # 2 second buffer for valve switching
+        
+        # Start continuous logging after calibration is loaded
+        print("\n=== STARTING CONTINUOUS LOGGING ===")
+        start_continuous_logging(instr_id, channel, sample_dt=1.0, verbose=True)
+        
+        # Ramp pressure to 200 mbar over 100 seconds
+        print("\n=== RAMPING PRESSURE ===")
+        print("Ramping pressure to 200 mbar over 100 seconds...")
+        success = ramp_pressure(
             instr_id, 
             channel, 
-            pressure_mbar=500.0, 
-            duration_seconds=180.0, 
-            ramp_time=180.0,  # Ramp over the full 180 seconds
+            pressure_mbar=200.0, 
+            ramp_time=100.0,  # Ramp over 100 seconds
             sample_dt=1.0, 
             verbose=True
         )
         
         if not success:
             print("✗ Pressure ramp failed")
+            return
         else:
             print("✓ Pressure ramp completed successfully")
+        
+        # Set flow rate to 200 µL/min using PID control
+        print("\n=== SETTING FLOW RATE ===")
+        print("Setting flow rate to 200 µL/min using PID control...")
+        flow_result = set_flowrate(
+            instr_id,
+            channel,
+            flow_rate_ul_min=200.0,
+            k_p=0.001,
+            k_i=0.001,
+            verbose=True
+        )
+        
+        if not flow_result:
+            print("✗ Flow rate setting failed")
+            return
+        else:
+            print("✓ Flow rate PID control started successfully")
+        
+        # Monitor and plot for 3 minutes (180 seconds)
+        print("\n=== MONITORING FLOW RATE ===")
+        print("Monitoring flow rate for 3 minutes...")
+        monitor_start_time = time.time()
+        monitor_duration = 180.0  # 3 minutes
+        
+        while (time.time() - monitor_start_time) < monitor_duration:
+            elapsed = time.time() - monitor_start_time
+            remaining = monitor_duration - elapsed
+            
+            # Read current values
+            sen = c_double()
+            reg = c_double()
+            error = OB1_Get_Data(instr_id, channel, byref(reg), byref(sen))
+            
+            if error == 0:
+                current_pressure = reg.value  # mbar
+                current_flow = sen.value  # µL/min
+                
+                print(f"Time: {elapsed:.1f}s/{monitor_duration:.1f}s - "
+                      f"Pressure: {current_pressure:.1f} mbar - "
+                      f"Flow: {current_flow:.1f} µL/min - "
+                      f"Remaining: {remaining:.1f}s")
+            
+            time.sleep(2.0)  # Update every 2 seconds
+        
+        print("✓ Monitoring completed")
     
     finally:
         # Cleanup
         print("\n=== CLEANUP ===")
+        
+        # Stop PID control first
+        print("Stopping PID control...")
+        error = PID_Set_Running_Remote(instr_id, channel, c_int32(0))
+        if error != 0:
+            print(f"Warning: Error stopping PID control: {error}")
+        else:
+            print("✓ PID control stopped")
         
         # Stop continuous logging
         print("Stopping continuous logging...")
         results = stop_continuous_logging(verbose=True)
         
         if results:
+            print(f"✓ Continuous logging collected {results.get('samples', 0)} samples")
+            print(f"✓ Duration: {results.get('duration', 0):.1f} seconds")
+            print(f"✓ Time range: {min(results.get('time_log', [0])):.1f}s to {max(results.get('time_log', [0])):.1f}s")
+            
             # Save the continuous logging data
             filename = save_continuous_logging_data()
             if filename:
@@ -1462,10 +1616,18 @@ def main():
             plot_filename = plot_channel_data(results, save_plot=True, show_plot=True)
             if plot_filename:
                 print(f"✓ Final plot saved to: {plot_filename}")
+        else:
+            print("✗ No continuous logging data available for plotting")
         
         # Set pressure to zero and destruct OB1
         print("Setting pressure to zero...")
         error = OB1_Set_Press(instr_id.value, channel, c_double(0))
+        
+        # Cleanup MUX DRI
+        print("Cleaning up MUX DRI...")
+        mux_success = cleanup_MUX_DRI(MUX_DRI_Instr_Id, verbose=True)
+        if not mux_success:
+            print("Warning: MUX DRI cleanup had issues")
         
         print("Destructing OB1...")
         error = OB1_Destructor(instr_id.value)
