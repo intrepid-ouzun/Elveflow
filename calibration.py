@@ -88,7 +88,7 @@ err = PID_Add_Remote(Instr_ID.value, channel_MFS,
                      K_p, K_i, 1)
 
 err = PID_Set_Running_Remote(Instr_ID.value, channel_MFS, c_int32(1))  # start PID
-err = PID_Set_Params_Remote(Instr_ID.value, channel_MFS, 1, K_p, K_i)  # load gains
+err = PID_Set_Params_Remote(Instr_ID.value, channel_MFS, 1, K_p, K_i) # to change p and i paramters
 
 # --- BUFFERS ---
 time_log = []
