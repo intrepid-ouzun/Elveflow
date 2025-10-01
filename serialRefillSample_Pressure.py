@@ -292,6 +292,139 @@ def ramp_pressure(instr_id, channel, pressure_mbar, ramp_time=0.0,
 
 
 
+def set_flowrate(instr_id, channel, flow_rate_ul_min, k_p=0.001, k_i=0.001, verbose=True):
+    """
+    Set flow rate on a channel to the desired value using PID control.
+    
+    Args:
+        instr_id: OB1 instrument ID
+        channel: Channel to control
+        flow_rate_ul_min: Target flow rate in µL/min
+        k_p: Proportional gain for PID
+        k_i: Integral gain for PID
+        verbose: Print progress information
+    
+    Returns:
+        dict: Flow rate setting results
+    """
+    if verbose:
+        print(f"\n=== SET FLOW RATE ===")
+        print(f"Channel: {channel.value}")
+        print(f"Target Flow Rate: {flow_rate_ul_min} µL/min")
+        print(f"PID Parameters: Kp={k_p}, Ki={k_i}")
+        print("-" * 30)
+    
+    try:
+        # Set up PID control
+        if verbose:
+            print("Setting up PID control...")
+        
+        error = PID_Add_Remote(instr_id, channel, instr_id, channel, k_p, k_i, 1)
+        if error != 0:
+            if verbose:
+                print(f"Error setting up PID: {error}")
+            return None
+        
+        error = PID_Set_Running_Remote(instr_id, channel, c_int32(1))
+        if error != 0:
+            if verbose:
+                print(f"Error starting PID: {error}")
+            return None
+        
+        error = OB1_Set_Sens(instr_id, channel, c_double(flow_rate_ul_min))
+        if error != 0:
+            if verbose:
+                print(f"Error setting flow rate: {error}")
+            return None
+        
+        if verbose:
+            print("PID control started successfully")
+        
+        # Read initial flow rate to verify
+        if verbose:
+            print("Verifying flow rate...")
+            time.sleep(1.0)  # Wait for system to stabilize
+            
+            sen = c_double()
+            reg = c_double()
+            error = OB1_Get_Data(instr_id, channel, byref(reg), byref(sen))
+            
+            if error == 0:
+                current_flow = sen.value  # µL/min
+                current_pressure = reg.value  # mbar
+                
+                print(f"Current Flow Rate: {current_flow:.1f} µL/min")
+                print(f"Current Pressure: {current_pressure:.1f} mbar")
+                
+                # Calculate accuracy
+                accuracy = (current_flow / flow_rate_ul_min) * 100 if flow_rate_ul_min > 0 else 0
+                print(f"Flow Rate Accuracy: {accuracy:.1f}%")
+            else:
+                if verbose:
+                    print(f"Error reading sensor data: {error}")
+        
+        # Prepare results
+        results = {
+            'target_flow_rate': flow_rate_ul_min,
+            'k_p': k_p,
+            'k_i': k_i,
+            'success': True
+        }
+        
+        if verbose:
+            print(f"\n=== FLOW RATE SET ===")
+            print(f"Target Flow Rate: {flow_rate_ul_min:.1f} µL/min")
+            print(f"PID Parameters: Kp={k_p}, Ki={k_i}")
+            print("Flow rate set successfully")
+            print("=" * 30)
+        
+        return results
+    
+    except Exception as e:
+        if verbose:
+            print(f"Exception during flow rate setting: {e}")
+        return None
+
+def stop_flow(instr_id, channel, verbose=True):
+    """
+    Stop flow on a channel by setting pressure to zero.
+    
+    Args:
+        instr_id: OB1 instrument ID
+        channel: Channel to stop
+        verbose: Print progress information
+    
+    Returns:
+        bool: Success status
+    """
+    if verbose:
+        print(f"\n=== STOP FLOW ===")
+        print(f"Channel: {channel.value}")
+        print("-" * 20)
+    
+    try:
+        # Stop PID control if running
+        error = PID_Set_Running_Remote(instr_id, channel, c_int32(0))
+        if error != 0 and verbose:
+            print(f"Warning: Error stopping PID: {error}")
+        
+        # Set pressure to zero
+        error = OB1_Set_Press(instr_id, channel, c_double(0))
+        if error != 0:
+            if verbose:
+                print(f"Error stopping flow: {error}")
+            return False
+        
+        if verbose:
+            print("Flow stopped successfully")
+            print("=" * 20)
+        
+        return True
+    
+    except Exception as e:
+        if verbose:
+            print(f"Exception during flow stop: {e}")
+        return False
 
 
 def cleanup_MUX_DRI(MUX_DRI_Instr_Id, verbose=True):
@@ -400,6 +533,10 @@ def stop_all_channels(instr_id, verbose=True):
         for channel_num in range(1, 5):  # Assuming 4 channels
             channel = c_int32(channel_num)
             
+            # Stop PID control if running
+            pid_error = PID_Set_Running_Remote(instr_id, channel, c_int32(0))
+            if pid_error != 0 and verbose:
+                print(f"Warning: Error stopping PID on channel {channel_num}: {pid_error}")
             
             # Set pressure to zero
             error = OB1_Set_Press(instr_id, channel, c_double(0))
@@ -1278,6 +1415,14 @@ def main():
         return
     print("✓ MUX DRI initialized successfully")
     
+    # Add sensor
+    print("\n=== ADDING SENSOR ===")
+    error = OB1_Add_Sens(instr_id.value, channel.value, 5, 1, 1, 7, 0)
+    if error != 0:
+        print(f"Error adding sensor: {error}")
+        return
+    print("✓ Sensor added successfully")
+    
     try:
         # # Perform calibration and save it
         # print("\n=== PERFORMING CALIBRATION ===")
@@ -1320,14 +1465,14 @@ def main():
         print(f"✓ MUX DRI homed successfully")
         
         # Set MUX valve to position 1
-        print("\n=== SETTING MUX VALVE TO POSITION 3 ===")
-        success, error_code = set_MUX_DRI_valve(MUX_DRI_Instr_Id, 3, rotation=0, verbose=True)
+        print("\n=== SETTING MUX VALVE TO POSITION 1 ===")
+        success, error_code = set_MUX_DRI_valve(MUX_DRI_Instr_Id, 1, rotation=0, verbose=True)
         
         if not success:
             print(f"✗ MUX valve setting failed with error: {error_code}")
             return
         
-        print(f"✓ MUX valve set to position 3")
+        print(f"✓ MUX valve set to position 1")
         
         # Add buffer time for valve to settle
         time.sleep(3.0)  # 3 second buffer
@@ -1358,7 +1503,7 @@ def main():
             print(f"STARTING CYCLE {cycle_num}/10")
             print(f"{'='*60}")
             
-            for valve_num in [3, 4]:  # Toggle between valves 3 and 4
+            for valve_num in range(1, 5):  # Loop through valves 1, 2, 3, 4
                 print(f"\n=== CYCLE {cycle_num}/10 - VALVE {valve_num} ===")
                 
                 # Switch to current valve
@@ -1396,174 +1541,98 @@ def main():
                 # else:
                 #     print(f"✓ Pressure ramp completed successfully for valve {valve_num}")
                 
-                # Send pressure pulse to prime the line: 600 mbar with 5s ramp up, 3s hold, 5s ramp down
-                print(f"\n=== PRIME THE LINE FOR VALVE {valve_num} ===")
-                print("Sending 600 mbar pressure pulse to prime the line...")
-                print("Ramp up: 5s, Hold: 3s, Ramp down: 5s")
+                # Set flow rate to 200 µL/min using PID control
+                print(f"\n=== SETTING FLOW RATE FOR VALVE {valve_num} ===")
+                print("Setting flow rate to 200 µL/min using PID control...")
+                flow_result = set_flowrate(
+                    instr_id,
+                    channel,
+                    flow_rate_ul_min=200.0,
+                    k_p=0.001,
+                    k_i=0.001,
+                    verbose=True
+                )
                 
-                pulse_start = time.time()
-                ramp_up_time = 5.0     # 5 seconds ramp up
-                hold_time = 3.0        # 3 seconds hold
-                ramp_down_time = 5.0   # 5 seconds ramp down
-                pulse_duration = ramp_up_time + hold_time + ramp_down_time  # 13 seconds total
-                target_pressure = 600.0
+                if not flow_result:
+                    print(f"✗ Flow rate setting failed for valve {valve_num}")
+                    continue  # Skip this valve and continue with next
+                else:
+                    print(f"✓ Flow rate PID control started successfully for valve {valve_num}")
+            
+                # Wait for flow rate to reach 200 ± 10 µL/min
+                print(f"\n=== WAITING FOR FLOW RATE STABILIZATION AT VALVE {valve_num} ===")
+                print("Waiting for flow rate to reach 200 ± 10 µL/min...")
+                target_flow = 200.0
+                tolerance = 10.0
+                min_flow = target_flow - tolerance  # 190 µL/min
+                max_flow = target_flow + tolerance  # 210 µL/min
                 
-                while (time.time() - pulse_start) < pulse_duration:
-                    elapsed_pulse = time.time() - pulse_start
+                stabilization_start = time.time()
+                max_wait_time = 300.0  # Maximum 5 minutes wait time
+                
+                while (time.time() - stabilization_start) < max_wait_time:
+                    elapsed_wait = time.time() - stabilization_start
                     
-                    # Calculate target pressure based on phase
-                    if elapsed_pulse <= ramp_up_time:
-                        # Ramp up phase
-                        progress = elapsed_pulse / ramp_up_time
-                        current_target = target_pressure * progress
-                        phase = "Ramp Up"
-                    elif elapsed_pulse <= ramp_up_time + hold_time:
-                        # Hold phase
-                        current_target = target_pressure
-                        phase = "Hold"
-                    else:
-                        # Ramp down phase
-                        ramp_down_elapsed = elapsed_pulse - (ramp_up_time + hold_time)
-                        progress = ramp_down_elapsed / ramp_down_time
-                        current_target = target_pressure * (1.0 - progress)
-                        phase = "Ramp Down"
-                    
-                    # Set pressure
-                    error = OB1_Set_Press(instr_id, channel, c_double(current_target))
-                    
-                    # Read current pressure values
+                    # Read current values
+                    sen = c_double()
                     reg = c_double()
-                    error_read = OB1_Get_Data(instr_id, channel, byref(reg), None)
+                    error = OB1_Get_Data(instr_id, channel, byref(reg), byref(sen))
                     
-                    if error_read == 0:
-                        actual_pressure = reg.value
+                    if error == 0:
+                        current_pressure = reg.value  # mbar
+                        current_flow = sen.value  # µL/min
                         
-                        print(f"Cycle {cycle_num}/10 - Valve {valve_num} - {phase}: {elapsed_pulse:.1f}s/{pulse_duration:.1f}s - "
-                              f"Target: {current_target:.1f} mbar - "
-                              f"Actual: {actual_pressure:.1f} mbar")
-                    
-                    time.sleep(0.5)  # Update every 0.5 seconds
-                
-                # Ramp down pressure to 0 over 5 seconds after priming pulse
-                print("Ramping down pressure to 0 over 5 seconds...")
-                ramp_down_start = time.time()
-                ramp_down_duration = 5.0
-                initial_pressure = target_pressure
-                
-                while (time.time() - ramp_down_start) < ramp_down_duration:
-                    elapsed_ramp = time.time() - ramp_down_start
-                    progress = elapsed_ramp / ramp_down_duration
-                    current_target = initial_pressure * (1.0 - progress)
-                    
-                    # Set pressure
-                    error = OB1_Set_Press(instr_id, channel, c_double(current_target))
-                    
-                    # Read current pressure values
-                    reg = c_double()
-                    error_read = OB1_Get_Data(instr_id, channel, byref(reg), None)
-                    
-                    if error_read == 0:
-                        actual_pressure = reg.value
-                        print(f"Cycle {cycle_num}/10 - Valve {valve_num} - Ramp Down: {elapsed_ramp:.1f}s/{ramp_down_duration:.1f}s - "
-                              f"Target: {current_target:.1f} mbar - "
-                              f"Actual: {actual_pressure:.1f} mbar")
-                    
-                    time.sleep(0.2)  # Update every 0.2 seconds
-                
-                # Ensure pressure is set to 0
-                OB1_Set_Press(instr_id, channel, c_double(0))
-                print(f"✓ Line priming completed for valve {valve_num}")
-                
-                # Wait 5 seconds between pulses
-                print("Waiting 5 seconds before next pulse...")
-                time.sleep(5.0)
-                
-                # Send sampling pulse: 300 mbar with 5s ramp up, 60s hold, 5s ramp down
-                print(f"\n=== SAMPLING PULSE FOR VALVE {valve_num} ===")
-                print("Sending 300 mbar sampling pulse...")
-                print("Ramp up: 5s, Hold: 60s, Ramp down: 5s")
-                
-                pulse_start = time.time()
-                ramp_up_time = 5.0     # 5 seconds ramp up
-                hold_time = 60.0       # 60 seconds hold
-                ramp_down_time = 5.0   # 5 seconds ramp down
-                pulse_duration = ramp_up_time + hold_time + ramp_down_time  # 70 seconds total
-                target_pressure = 300.0
-                
-                while (time.time() - pulse_start) < pulse_duration:
-                    elapsed_pulse = time.time() - pulse_start
-                    
-                    # Calculate target pressure based on phase
-                    if elapsed_pulse <= ramp_up_time:
-                        # Ramp up phase
-                        progress = elapsed_pulse / ramp_up_time
-                        current_target = target_pressure * progress
-                        phase = "Ramp Up"
-                    elif elapsed_pulse <= ramp_up_time + hold_time:
-                        # Hold phase
-                        current_target = target_pressure
-                        phase = "Hold"
-                    else:
-                        # Ramp down phase
-                        ramp_down_elapsed = elapsed_pulse - (ramp_up_time + hold_time)
-                        progress = ramp_down_elapsed / ramp_down_time
-                        current_target = target_pressure * (1.0 - progress)
-                        phase = "Ramp Down"
-                    
-                    # Set pressure
-                    error = OB1_Set_Press(instr_id, channel, c_double(current_target))
-                    
-                    # Read current pressure values
-                    reg = c_double()
-                    error_read = OB1_Get_Data(instr_id, channel, byref(reg), None)
-                    
-                    if error_read == 0:
-                        actual_pressure = reg.value
+                        print(f"Cycle {cycle_num}/10 - Valve {valve_num} - Waiting: {elapsed_wait:.1f}s - "
+                              f"Pressure: {current_pressure:.1f} mbar - "
+                              f"Flow: {current_flow:.1f} µL/min - "
+                              f"Target: {target_flow} ± {tolerance} µL/min")
                         
-                        print(f"Cycle {cycle_num}/10 - Valve {valve_num} - {phase}: {elapsed_pulse:.1f}s/{pulse_duration:.1f}s - "
-                              f"Target: {current_target:.1f} mbar - "
-                              f"Actual: {actual_pressure:.1f} mbar")
+                        # Check if flow rate is within target range
+                        if min_flow <= current_flow <= max_flow:
+                            print(f"✓ Flow rate stabilized at {current_flow:.1f} µL/min for valve {valve_num}")
+                            break
+                    else:
+                        print(f"Error reading sensor data: {error}")
                     
-                    time.sleep(0.5)  # Update every 0.5 seconds
+                    time.sleep(2.0)  # Check every 2 seconds
+                else:
+                    print(f"⚠ Warning: Flow rate did not stabilize within {max_wait_time/60:.1f} minutes for valve {valve_num}")
+                    print("Continuing with current flow rate...")
                 
-                # Ramp down pressure to 0 over 5 seconds after sampling pulse
-                print("Ramping down pressure to 0 over 5 seconds...")
-                ramp_down_start = time.time()
-                ramp_down_duration = 5.0
-                initial_pressure = target_pressure
+                # Monitor and plot for 1 minute (60 seconds) after stabilization
+                print(f"\n=== SAMPLING FLOW RATE AT VALVE {valve_num} ===")
+                print(f"Sampling flow rate for 1 minute at valve {valve_num}...")
+                monitor_start_time = time.time()
+                monitor_duration = 60.0  # 1 minute
                 
-                while (time.time() - ramp_down_start) < ramp_down_duration:
-                    elapsed_ramp = time.time() - ramp_down_start
-                    progress = elapsed_ramp / ramp_down_duration
-                    current_target = initial_pressure * (1.0 - progress)
+                while (time.time() - monitor_start_time) < monitor_duration:
+                    elapsed = time.time() - monitor_start_time
+                    remaining = monitor_duration - elapsed
                     
-                    # Set pressure
-                    error = OB1_Set_Press(instr_id, channel, c_double(current_target))
-                    
-                    # Read current pressure values
+                    # Read current values
+                    sen = c_double()
                     reg = c_double()
-                    error_read = OB1_Get_Data(instr_id, channel, byref(reg), None)
+                    error = OB1_Get_Data(instr_id, channel, byref(reg), byref(sen))
                     
-                    if error_read == 0:
-                        actual_pressure = reg.value
-                        print(f"Cycle {cycle_num}/10 - Valve {valve_num} - Ramp Down: {elapsed_ramp:.1f}s/{ramp_down_duration:.1f}s - "
-                              f"Target: {current_target:.1f} mbar - "
-                              f"Actual: {actual_pressure:.1f} mbar")
+                    if error == 0:
+                        current_pressure = reg.value  # mbar
+                        current_flow = sen.value  # µL/min
+                        
+                        print(f"Cycle {cycle_num}/10 - Valve {valve_num} - Sampling: {elapsed:.1f}s/{monitor_duration:.1f}s - "
+                              f"Pressure: {current_pressure:.1f} mbar - "
+                              f"Flow: {current_flow:.1f} µL/min - "
+                              f"Remaining: {remaining:.1f}s")
                     
-                    time.sleep(0.2)  # Update every 0.2 seconds
+                    time.sleep(2.0)  # Update every 2 seconds
                 
-                # Ensure pressure is set to 0
-                OB1_Set_Press(instr_id, channel, c_double(0))
-                print(f"✓ Sampling pulse completed for valve {valve_num}")
+                print(f"✓ Sampling completed for valve {valve_num}")
                 
-                print(f"✓ Line priming and sampling completed for valve {valve_num}")
-                
-                # Pause for 20 seconds between valve switches (except for the last valve)
-                if valve_num == 3:  # Don't pause after valve 4 (the last valve)
+                # Pause for 1 minute between valve switches (except for the last valve)
+                if valve_num < 4:  # Don't pause after the last valve
                     print(f"\n=== PAUSING BEFORE NEXT VALVE ===")
-                    print(f"Pausing for 20 seconds before switching to valve {valve_num + 1}...")
+                    print(f"Pausing for 1 minute before switching to valve {valve_num + 1}...")
                     pause_start_time = time.time()
-                    pause_duration = 20.0  # 20 seconds pause
+                    pause_duration = 60.0  # 1 minute pause
                     
                     while (time.time() - pause_start_time) < pause_duration:
                         elapsed_pause = time.time() - pause_start_time
@@ -1586,6 +1655,14 @@ def main():
     finally:
         # Cleanup
         print("\n=== CLEANUP ===")
+        
+        # Stop PID control first
+        print("Stopping PID control...")
+        error = PID_Set_Running_Remote(instr_id, channel, c_int32(0))
+        if error != 0:
+            print(f"Warning: Error stopping PID control: {error}")
+        else:
+            print("✓ PID control stopped")
         
         # Stop continuous logging
         print("Stopping continuous logging...")
