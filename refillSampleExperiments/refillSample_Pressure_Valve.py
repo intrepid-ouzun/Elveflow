@@ -1241,17 +1241,17 @@ def run_pressure_profile_iteration(instr_id, channel, iteration):
         channel: Channel to use
         iteration: Current iteration number
     """
-    # Send pressure pulse to prime the line: 600 mbar with 5s ramp up, 3s hold, 5s ramp down
+    # Send pressure pulse to prime the line: 700 mbar with 5s ramp up, 10s hold, 5s ramp down
     print("\n=== PRIME THE LINE ===")
-    print("Sending 600 mbar pressure pulse to prime the line...")
-    print("Ramp up: 5s, Hold: 3s, Ramp down: 5s")
+    print("Sending 700 mbar pressure pulse to prime the line...")
+    print("Ramp up: 5s, Hold: 10s, Ramp down: 5s")
     
     pulse_start = time.time()
     ramp_up_time = 5.0     # 5 seconds ramp up
-    hold_time = 3.0        # 3 seconds hold
+    hold_time = 5.0       # 10 seconds hold
     ramp_down_time = 5.0   # 5 seconds ramp down
-    pulse_duration = ramp_up_time + hold_time + ramp_down_time  # 13 seconds total
-    target_pressure = 600.0
+    pulse_duration = ramp_up_time + hold_time + ramp_down_time  # 20 seconds total
+    target_pressure = 500.0
     
     while (time.time() - pulse_start) < pulse_duration:
         elapsed_pulse = time.time() - pulse_start
@@ -1333,7 +1333,7 @@ def run_pressure_profile_iteration(instr_id, channel, iteration):
     hold_time = 60.0       # 60 seconds hold
     ramp_down_time = 5.0   # 5 seconds ramp down
     pulse_duration = ramp_up_time + hold_time + ramp_down_time  # 70 seconds total
-    target_pressure = 400.0
+    target_pressure = 300.0
     
     while (time.time() - pulse_start) < pulse_duration:
         elapsed_pulse = time.time() - pulse_start
@@ -1403,13 +1403,15 @@ def run_pressure_profile_iteration(instr_id, channel, iteration):
 
 def main():
     """
-    Pressure profile experiment with MUX DRI valve 4 (10 iterations):
+    Pressure profile experiment with MUX DRI (11 iterations, 4 valves each):
     1. Initialize OB1 and MUX DRI
-    2. Home and set MUX DRI valve to position 4
+    2. Home MUX DRI valve
     3. Load calibration
     4. Start continuous logging
-    5. Run 10 iterations of pressure profile (priming + sampling pulses at 400 mbar)
-    6. 100-second pause between iterations
+    5. Run 11 iterations of pressure profile (4 valves per iteration):
+       - For each valve (1-4): 700 mbar priming (10s) + 400 mbar sampling (60s)
+       - 5-second pause between valves
+    6. 10-second pause between iterations
     7. Save plot and cleanup
     """
     
@@ -1464,24 +1466,41 @@ def main():
         print("\n=== STARTING CONTINUOUS LOGGING ===")
         start_continuous_logging(instr_id, channel, sample_dt=1.0, verbose=True)
         
-        # Apply pressure profile: priming pulse + sampling pulse (10 iterations)
+        # Apply pressure profile: priming pulse + sampling pulse (11 iterations, 4 valves each)
         print("\n=== STARTING PRESSURE PROFILE EXPERIMENT ===")
-        print("Running 10 iterations of: priming pulse + sampling pulse")
+        print("Running 11 iterations of: priming pulse + sampling pulse for 4 valves each")
         
         for iteration in range(1, 11):
             print(f"\n{'='*60}")
-            print(f"ITERATION {iteration}/10")
+            print(f"ITERATION {iteration}/11")
             print(f"{'='*60}")
             
-            # Run single pressure profile iteration
-            run_pressure_profile_iteration(instr_id, channel, iteration)
+            # Iterate through 4 valves (1-4) for each sample iteration
+            for valve_num in range(1, 5):
+                print(f"\n--- VALVE {valve_num}/4 ---")
+                
+                # Set MUX DRI valve to current position
+                print(f"Setting MUX DRI valve to position {valve_num}...")
+                set_MUX_DRI_valve(MUX_DRI_Instr_Id, valve_num, verbose=True)
+                
+                # Wait for valve to stabilize
+                print("Waiting 5 seconds for valve to stabilize...")
+                time.sleep(5.0)
+                
+                # Run single pressure profile iteration for this valve
+                run_pressure_profile_iteration(instr_id, channel, iteration)
+                
+                # Wait between valves (except after the last valve)
+                if valve_num < 4:
+                    print(f"Waiting 5 seconds before switching to valve {valve_num + 1}...")
+                    time.sleep(5.0)
             
             # Sleep between iterations (except after the last one)
-            if iteration < 10:
-                print(f"\nWaiting 100 seconds before iteration {iteration + 1}...")
-                time.sleep(100.0)
+            if iteration < 11:
+                print(f"\nWaiting 10 seconds before iteration {iteration + 1}...")
+                time.sleep(10.0)
         
-        print("✓ All 10 pressure profile iterations completed")
+        print("✓ All 11 pressure profile iterations completed")
     
     finally:
         # Cleanup

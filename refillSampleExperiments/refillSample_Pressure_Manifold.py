@@ -1060,17 +1060,17 @@ def run_pressure_profile_iteration(instr_id, channel, iteration):
         channel: Channel to use
         iteration: Current iteration number
     """
-    # Send pressure pulse to prime the line: 600 mbar with 5s ramp up, 3s hold, 5s ramp down
+    # Send pressure pulse to prime the line: 1000 mbar with 5s ramp up, 10s hold, 5s ramp down
     print("\n=== PRIME THE LINE ===")
-    print("Sending 600 mbar pressure pulse to prime the line...")
-    print("Ramp up: 5s, Hold: 3s, Ramp down: 5s")
+    print("Sending 1000 mbar pressure pulse to prime the line...")
+    print("Ramp up: 5s, Hold: 10s, Ramp down: 5s")
     
     pulse_start = time.time()
     ramp_up_time = 5.0     # 5 seconds ramp up
-    hold_time = 10.0        # 3 seconds hold
+    hold_time = 15.0        # 3 seconds hold
     ramp_down_time = 5.0   # 5 seconds ramp down
     pulse_duration = ramp_up_time + hold_time + ramp_down_time  # 13 seconds total
-    target_pressure = 900.0
+    target_pressure = 1000.0
     
     while (time.time() - pulse_start) < pulse_duration:
         elapsed_pulse = time.time() - pulse_start
@@ -1142,17 +1142,17 @@ def run_pressure_profile_iteration(instr_id, channel, iteration):
     print("Waiting 5 seconds before sampling pulse...")
     time.sleep(5.0)
     
-    # Send sampling pulse: 900 mbar with 5s ramp up, 60s hold, 5s ramp down
+    # Send sampling pulse: 450 mbar with 5s ramp up, 40s hold, 5s ramp down
     print("\n=== SAMPLING PULSE ===")
-    print("Sending 900 mbar sampling pulse...")
-    print("Ramp up: 5s, Hold: 60s, Ramp down: 5s")
+    print("Sending 450 mbar sampling pulse...")
+    print("Ramp up: 5s, Hold: 40s, Ramp down: 5s")
     
     pulse_start = time.time()
     ramp_up_time = 5.0     # 5 seconds ramp up
-    hold_time = 60.0       # 60 seconds hold
+    hold_time = 40.0       # 40 seconds hold
     ramp_down_time = 5.0   # 5 seconds ramp down
-    pulse_duration = ramp_up_time + hold_time + ramp_down_time  # 70 seconds total
-    target_pressure = 1000.0
+    pulse_duration = ramp_up_time + hold_time + ramp_down_time  # 50 seconds total
+    target_pressure = 450.0
     
     while (time.time() - pulse_start) < pulse_duration:
         elapsed_pulse = time.time() - pulse_start
@@ -1227,7 +1227,7 @@ def main():
     2. Load calibration
     3. Start continuous logging
     4. Run initial priming process (1000 mbar for 30 seconds)
-    5. Run 10 iterations of pressure profile (priming + sampling pulses at 900 mbar)
+    5. Run 10 iterations of pressure profile (priming + sampling pulses: 1000 mbar priming, 450 mbar sampling for 40s)
     6. 100-second pause between iterations
     7. Save plot and cleanup
     """
