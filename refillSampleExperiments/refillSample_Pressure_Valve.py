@@ -1403,9 +1403,9 @@ def run_pressure_profile_iteration(instr_id, channel, iteration):
 
 def main():
     """
-    Pressure profile experiment with MUX DRI valve 1 (10 iterations):
+    Pressure profile experiment with MUX DRI valve 4 (10 iterations):
     1. Initialize OB1 and MUX DRI
-    2. Home and set MUX DRI valve to position 1
+    2. Home and set MUX DRI valve to position 4
     3. Load calibration
     4. Start continuous logging
     5. Run 10 iterations of pressure profile (priming + sampling pulses at 400 mbar)
@@ -1427,7 +1427,7 @@ def main():
     # Initialize MUX DRI
     MUX_DRI_Instr_Id = c_int32(-1)
     print("\n=== INITIALIZING MUX DRI ===")
-    error = MUX_DRI_Initialization('MUX_DRI'.encode('ascii'), 0, 0, 0, 0, byref(MUX_DRI_Instr_Id))
+    error = MUX_DRI_Initialization('12MUX'.encode('ascii'), byref(MUX_DRI_Instr_Id))
     if error != 0:
         print(f"Error initializing MUX DRI: {error}")
         return
@@ -1437,9 +1437,9 @@ def main():
     print("\n=== HOMING MUX DRI VALVE ===")
     home_MUX_DRI(MUX_DRI_Instr_Id, verbose=True)
     
-    # Set MUX DRI valve to position 1
-    print("\n=== SETTING MUX DRI VALVE TO POSITION 1 ===")
-    set_MUX_DRI_valve(MUX_DRI_Instr_Id, 1, verbose=True)
+    # Set MUX DRI valve to position 4
+    print("\n=== SETTING MUX DRI VALVE TO POSITION 4 ===")
+    set_MUX_DRI_valve(MUX_DRI_Instr_Id, 4, verbose=True)
     
     try:
         # Load existing calibration
