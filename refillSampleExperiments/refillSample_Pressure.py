@@ -729,7 +729,7 @@ def log_channel_data_to_file(results, filename=None):
     
     if filename is None:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"channel_monitoring_{results['channel']}_{timestamp}.csv"
+        filename = f"plots/channel_monitoring_{results['channel']}_{timestamp}.csv"
     
     try:
         with open(filename, 'w') as f:
@@ -801,7 +801,7 @@ def plot_channel_data(results, save_plot=True, show_plot=True, filename=None):
     if save_plot:
         if filename is None:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"channel_plot_{results['channel']}_{timestamp}.png"
+            filename = f"plots/channel_plot_{results['channel']}_{timestamp}.png"
         
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         print(f"Plot saved to: {filename}")
@@ -1215,7 +1215,7 @@ def save_continuous_logging_data(filename=None):
         
         if filename is None:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"continuous_logging_{_logging_data['channel']}_{timestamp}.csv"
+            filename = f"plots/continuous_logging_{_logging_data['channel']}_{timestamp}.csv"
         
         try:
             with open(filename, 'w') as f:
@@ -1232,15 +1232,185 @@ def save_continuous_logging_data(filename=None):
             print(f"Error saving continuous logging data: {e}")
             return ""
 
+def run_pressure_profile_iteration(instr_id, channel, iteration):
+    """
+    Run a single pressure profile iteration (priming + sampling pulse).
+    
+    Args:
+        instr_id: OB1 instrument ID
+        channel: Channel to use
+        iteration: Current iteration number
+    """
+    # Send pressure pulse to prime the line: 600 mbar with 5s ramp up, 3s hold, 5s ramp down
+    print("\n=== PRIME THE LINE ===")
+    print("Sending 600 mbar pressure pulse to prime the line...")
+    print("Ramp up: 5s, Hold: 3s, Ramp down: 5s")
+    
+    pulse_start = time.time()
+    ramp_up_time = 5.0     # 5 seconds ramp up
+    hold_time = 3.0        # 3 seconds hold
+    ramp_down_time = 5.0   # 5 seconds ramp down
+    pulse_duration = ramp_up_time + hold_time + ramp_down_time  # 13 seconds total
+    target_pressure = 600.0
+    
+    while (time.time() - pulse_start) < pulse_duration:
+        elapsed_pulse = time.time() - pulse_start
+        
+        # Calculate target pressure based on phase
+        if elapsed_pulse <= ramp_up_time:
+            # Ramp up phase
+            progress = elapsed_pulse / ramp_up_time
+            current_target = target_pressure * progress
+            phase = "Ramp Up"
+        elif elapsed_pulse <= ramp_up_time + hold_time:
+            # Hold phase
+            current_target = target_pressure
+            phase = "Hold"
+        else:
+            # Ramp down phase
+            ramp_down_elapsed = elapsed_pulse - (ramp_up_time + hold_time)
+            progress = ramp_down_elapsed / ramp_down_time
+            current_target = target_pressure * (1.0 - progress)
+            phase = "Ramp Down"
+        
+        # Set pressure
+        error = OB1_Set_Press(instr_id, channel, c_double(current_target))
+        
+        # Read current pressure values
+        reg = c_double()
+        error_read = OB1_Get_Data(instr_id, channel, byref(reg), None)
+        
+        if error_read == 0:
+            actual_pressure = reg.value
+            
+            print(f"Priming - {phase}: {elapsed_pulse:.1f}s/{pulse_duration:.1f}s - "
+                  f"Target: {current_target:.1f} mbar - "
+                  f"Actual: {actual_pressure:.1f} mbar")
+        
+        time.sleep(0.5)  # Update every 0.5 seconds
+    
+    # Ramp down pressure to 0 over 5 seconds after priming pulse
+    print("Ramping down pressure to 0 over 5 seconds...")
+    ramp_down_start = time.time()
+    ramp_down_duration = 5.0
+    initial_pressure = target_pressure
+    
+    while (time.time() - ramp_down_start) < ramp_down_duration:
+        elapsed_ramp = time.time() - ramp_down_start
+        progress = elapsed_ramp / ramp_down_duration
+        current_target = initial_pressure * (1.0 - progress)
+        
+        # Set pressure
+        error = OB1_Set_Press(instr_id, channel, c_double(current_target))
+        
+        # Read current pressure values
+        reg = c_double()
+        error_read = OB1_Get_Data(instr_id, channel, byref(reg), None)
+        
+        if error_read == 0:
+            actual_pressure = reg.value
+            print(f"Priming - Ramp Down: {elapsed_ramp:.1f}s/{ramp_down_duration:.1f}s - "
+                  f"Target: {current_target:.1f} mbar - "
+                  f"Actual: {actual_pressure:.1f} mbar")
+        
+        time.sleep(0.2)  # Update every 0.2 seconds
+    
+    # Ensure pressure is set to 0
+    OB1_Set_Press(instr_id, channel, c_double(0))
+    print("✓ Line priming completed")
+    
+    # Wait 5 seconds between pulses
+    print("Waiting 5 seconds before sampling pulse...")
+    time.sleep(5.0)
+    
+    # Send sampling pulse: 400 mbar with 5s ramp up, 60s hold, 5s ramp down
+    print("\n=== SAMPLING PULSE ===")
+    print("Sending 400 mbar sampling pulse...")
+    print("Ramp up: 5s, Hold: 60s, Ramp down: 5s")
+    
+    pulse_start = time.time()
+    ramp_up_time = 5.0     # 5 seconds ramp up
+    hold_time = 60.0       # 60 seconds hold
+    ramp_down_time = 5.0   # 5 seconds ramp down
+    pulse_duration = ramp_up_time + hold_time + ramp_down_time  # 70 seconds total
+    target_pressure = 400.0
+    
+    while (time.time() - pulse_start) < pulse_duration:
+        elapsed_pulse = time.time() - pulse_start
+        
+        # Calculate target pressure based on phase
+        if elapsed_pulse <= ramp_up_time:
+            # Ramp up phase
+            progress = elapsed_pulse / ramp_up_time
+            current_target = target_pressure * progress
+            phase = "Ramp Up"
+        elif elapsed_pulse <= ramp_up_time + hold_time:
+            # Hold phase
+            current_target = target_pressure
+            phase = "Hold"
+        else:
+            # Ramp down phase
+            ramp_down_elapsed = elapsed_pulse - (ramp_up_time + hold_time)
+            progress = ramp_down_elapsed / ramp_down_time
+            current_target = target_pressure * (1.0 - progress)
+            phase = "Ramp Down"
+        
+        # Set pressure
+        error = OB1_Set_Press(instr_id, channel, c_double(current_target))
+        
+        # Read current pressure values
+        reg = c_double()
+        error_read = OB1_Get_Data(instr_id, channel, byref(reg), None)
+        
+        if error_read == 0:
+            actual_pressure = reg.value
+            
+            print(f"Sampling - {phase}: {elapsed_pulse:.1f}s/{pulse_duration:.1f}s - "
+                  f"Target: {current_target:.1f} mbar - "
+                  f"Actual: {actual_pressure:.1f} mbar")
+        
+        time.sleep(0.5)  # Update every 0.5 seconds
+    
+    # Ramp down pressure to 0 over 5 seconds after sampling pulse
+    print("Ramping down pressure to 0 over 5 seconds...")
+    ramp_down_start = time.time()
+    ramp_down_duration = 5.0
+    initial_pressure = target_pressure
+    
+    while (time.time() - ramp_down_start) < ramp_down_duration:
+        elapsed_ramp = time.time() - ramp_down_start
+        progress = elapsed_ramp / ramp_down_duration
+        current_target = initial_pressure * (1.0 - progress)
+        
+        # Set pressure
+        error = OB1_Set_Press(instr_id, channel, c_double(current_target))
+        
+        # Read current pressure values
+        reg = c_double()
+        error_read = OB1_Get_Data(instr_id, channel, byref(reg), None)
+        
+        if error_read == 0:
+            actual_pressure = reg.value
+            print(f"Sampling - Ramp Down: {elapsed_ramp:.1f}s/{ramp_down_duration:.1f}s - "
+                  f"Target: {current_target:.1f} mbar - "
+                  f"Actual: {actual_pressure:.1f} mbar")
+        
+        time.sleep(0.2)  # Update every 0.2 seconds
+    
+    # Ensure pressure is set to 0
+    OB1_Set_Press(instr_id, channel, c_double(0))
+    print("✓ Sampling pulse completed")
+
 def main():
     """
-    Pressure profile experiment with MUX DRI valve 1:
+    Pressure profile experiment with MUX DRI valve 1 (10 iterations):
     1. Initialize OB1 and MUX DRI
     2. Home and set MUX DRI valve to position 1
     3. Load calibration
     4. Start continuous logging
-    5. Apply pressure profile (priming + sampling pulses at 400 mbar)
-    6. Save plot and cleanup
+    5. Run 10 iterations of pressure profile (priming + sampling pulses at 400 mbar)
+    6. 100-second pause between iterations
+    7. Save plot and cleanup
     """
     
     # Initialize OB1
@@ -1294,171 +1464,24 @@ def main():
         print("\n=== STARTING CONTINUOUS LOGGING ===")
         start_continuous_logging(instr_id, channel, sample_dt=1.0, verbose=True)
         
-        # Apply pressure profile: priming pulse + sampling pulse
+        # Apply pressure profile: priming pulse + sampling pulse (10 iterations)
         print("\n=== STARTING PRESSURE PROFILE EXPERIMENT ===")
-        print("Applying pressure profile: priming pulse + sampling pulse")
+        print("Running 10 iterations of: priming pulse + sampling pulse")
         
-        # Send pressure pulse to prime the line: 600 mbar with 5s ramp up, 3s hold, 5s ramp down
-        print("\n=== PRIME THE LINE ===")
-        print("Sending 600 mbar pressure pulse to prime the line...")
-        print("Ramp up: 5s, Hold: 3s, Ramp down: 5s")
+        for iteration in range(1, 11):
+            print(f"\n{'='*60}")
+            print(f"ITERATION {iteration}/10")
+            print(f"{'='*60}")
+            
+            # Run single pressure profile iteration
+            run_pressure_profile_iteration(instr_id, channel, iteration)
+            
+            # Sleep between iterations (except after the last one)
+            if iteration < 10:
+                print(f"\nWaiting 100 seconds before iteration {iteration + 1}...")
+                time.sleep(100.0)
         
-        pulse_start = time.time()
-        ramp_up_time = 5.0     # 5 seconds ramp up
-        hold_time = 3.0        # 3 seconds hold
-        ramp_down_time = 5.0   # 5 seconds ramp down
-        pulse_duration = ramp_up_time + hold_time + ramp_down_time  # 13 seconds total
-        target_pressure = 600.0
-        
-        while (time.time() - pulse_start) < pulse_duration:
-            elapsed_pulse = time.time() - pulse_start
-            
-            # Calculate target pressure based on phase
-            if elapsed_pulse <= ramp_up_time:
-                # Ramp up phase
-                progress = elapsed_pulse / ramp_up_time
-                current_target = target_pressure * progress
-                phase = "Ramp Up"
-            elif elapsed_pulse <= ramp_up_time + hold_time:
-                # Hold phase
-                current_target = target_pressure
-                phase = "Hold"
-            else:
-                # Ramp down phase
-                ramp_down_elapsed = elapsed_pulse - (ramp_up_time + hold_time)
-                progress = ramp_down_elapsed / ramp_down_time
-                current_target = target_pressure * (1.0 - progress)
-                phase = "Ramp Down"
-            
-            # Set pressure
-            error = OB1_Set_Press(instr_id, channel, c_double(current_target))
-            
-            # Read current pressure values
-            reg = c_double()
-            error_read = OB1_Get_Data(instr_id, channel, byref(reg), None)
-            
-            if error_read == 0:
-                actual_pressure = reg.value
-                
-                print(f"Priming - {phase}: {elapsed_pulse:.1f}s/{pulse_duration:.1f}s - "
-                      f"Target: {current_target:.1f} mbar - "
-                      f"Actual: {actual_pressure:.1f} mbar")
-            
-            time.sleep(0.5)  # Update every 0.5 seconds
-        
-        # Ramp down pressure to 0 over 5 seconds after priming pulse
-        print("Ramping down pressure to 0 over 5 seconds...")
-        ramp_down_start = time.time()
-        ramp_down_duration = 5.0
-        initial_pressure = target_pressure
-        
-        while (time.time() - ramp_down_start) < ramp_down_duration:
-            elapsed_ramp = time.time() - ramp_down_start
-            progress = elapsed_ramp / ramp_down_duration
-            current_target = initial_pressure * (1.0 - progress)
-            
-            # Set pressure
-            error = OB1_Set_Press(instr_id, channel, c_double(current_target))
-            
-            # Read current pressure values
-            reg = c_double()
-            error_read = OB1_Get_Data(instr_id, channel, byref(reg), None)
-            
-            if error_read == 0:
-                actual_pressure = reg.value
-                print(f"Priming - Ramp Down: {elapsed_ramp:.1f}s/{ramp_down_duration:.1f}s - "
-                      f"Target: {current_target:.1f} mbar - "
-                      f"Actual: {actual_pressure:.1f} mbar")
-            
-            time.sleep(0.2)  # Update every 0.2 seconds
-        
-        # Ensure pressure is set to 0
-        OB1_Set_Press(instr_id, channel, c_double(0))
-        print("✓ Line priming completed")
-        
-        # Wait 5 seconds between pulses
-        print("Waiting 5 seconds before sampling pulse...")
-        time.sleep(5.0)
-        
-        # Send sampling pulse: 400 mbar with 5s ramp up, 60s hold, 5s ramp down
-        print("\n=== SAMPLING PULSE ===")
-        print("Sending 400 mbar sampling pulse...")
-        print("Ramp up: 5s, Hold: 60s, Ramp down: 5s")
-        
-        pulse_start = time.time()
-        ramp_up_time = 5.0     # 5 seconds ramp up
-        hold_time = 60.0       # 60 seconds hold
-        ramp_down_time = 5.0   # 5 seconds ramp down
-        pulse_duration = ramp_up_time + hold_time + ramp_down_time  # 70 seconds total
-        target_pressure = 400.0
-        
-        while (time.time() - pulse_start) < pulse_duration:
-            elapsed_pulse = time.time() - pulse_start
-            
-            # Calculate target pressure based on phase
-            if elapsed_pulse <= ramp_up_time:
-                # Ramp up phase
-                progress = elapsed_pulse / ramp_up_time
-                current_target = target_pressure * progress
-                phase = "Ramp Up"
-            elif elapsed_pulse <= ramp_up_time + hold_time:
-                # Hold phase
-                current_target = target_pressure
-                phase = "Hold"
-            else:
-                # Ramp down phase
-                ramp_down_elapsed = elapsed_pulse - (ramp_up_time + hold_time)
-                progress = ramp_down_elapsed / ramp_down_time
-                current_target = target_pressure * (1.0 - progress)
-                phase = "Ramp Down"
-            
-            # Set pressure
-            error = OB1_Set_Press(instr_id, channel, c_double(current_target))
-            
-            # Read current pressure values
-            reg = c_double()
-            error_read = OB1_Get_Data(instr_id, channel, byref(reg), None)
-            
-            if error_read == 0:
-                actual_pressure = reg.value
-                
-                print(f"Sampling - {phase}: {elapsed_pulse:.1f}s/{pulse_duration:.1f}s - "
-                      f"Target: {current_target:.1f} mbar - "
-                      f"Actual: {actual_pressure:.1f} mbar")
-            
-            time.sleep(0.5)  # Update every 0.5 seconds
-        
-        # Ramp down pressure to 0 over 5 seconds after sampling pulse
-        print("Ramping down pressure to 0 over 5 seconds...")
-        ramp_down_start = time.time()
-        ramp_down_duration = 5.0
-        initial_pressure = target_pressure
-        
-        while (time.time() - ramp_down_start) < ramp_down_duration:
-            elapsed_ramp = time.time() - ramp_down_start
-            progress = elapsed_ramp / ramp_down_duration
-            current_target = initial_pressure * (1.0 - progress)
-            
-            # Set pressure
-            error = OB1_Set_Press(instr_id, channel, c_double(current_target))
-            
-            # Read current pressure values
-            reg = c_double()
-            error_read = OB1_Get_Data(instr_id, channel, byref(reg), None)
-            
-            if error_read == 0:
-                actual_pressure = reg.value
-                print(f"Sampling - Ramp Down: {elapsed_ramp:.1f}s/{ramp_down_duration:.1f}s - "
-                      f"Target: {current_target:.1f} mbar - "
-                      f"Actual: {actual_pressure:.1f} mbar")
-            
-            time.sleep(0.2)  # Update every 0.2 seconds
-        
-        # Ensure pressure is set to 0
-        OB1_Set_Press(instr_id, channel, c_double(0))
-        print("✓ Sampling pulse completed")
-        
-        print("✓ Pressure profile experiment completed")
+        print("✓ All 10 pressure profile iterations completed")
     
     finally:
         # Cleanup
